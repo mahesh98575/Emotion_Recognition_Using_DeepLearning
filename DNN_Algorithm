@@ -1,0 +1,84 @@
+import os
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+
+def load_subject_data(file_path):
+    df = pd.read_csv(file_path)  # Adjust delimiter and other options as needed
+    return df
+
+def load_all_csv_files_from_directory(directory_path):
+    csv_files = [os.path.join(directory_path, file) for file in os.listdir(directory_path) if file.endswith('.csv')]
+    return csv_files
+
+# Directory containing all the CSV files
+directory_path = '/content/ECG_data'
+
+# Get list of CSV files from the directory
+file_paths = load_all_csv_files_from_directory(directory_path)
+
+# Load and concatenate all datasets
+dfs = []
+for file_path in file_paths:
+    df = load_subject_data(file_path)
+    dfs.append(df)
+
+combined_df = pd.concat(dfs, ignore_index=True)
+
+# Encode 'Emotion' column
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+
+# Split features and target
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Handle missing values using SimpleImputer (fill missing values with the mean)
+imputer = SimpleImputer(strategy='mean')
+X = imputer.fit_transform(X)
+
+# Split into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Normalize data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Define the DNN model
+dnn_model = Sequential([
+    Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+    Dropout(0.5),
+    Dense(32, activation='relu'),
+    Dropout(0.5),
+    Dense(len(label_encoder.classes_), activation='softmax')
+])
+
+# Compile the model
+dnn_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+dnn_model.fit(X_train_scaled, y_train, epochs=60, batch_size=32, validation_split=0.2)
+
+# Predict and evaluate
+y_pred_dnn_prob = dnn_model.predict(X_test_scaled)
+y_pred_dnn = y_pred_dnn_prob.argmax(axis=1)
+
+# Metrics Calculation
+accuracy_dnn = accuracy_score(y_test, y_pred_dnn)
+f1_dnn = f1_score(y_test, y_pred_dnn, average='weighted')
+auc_dnn = roc_auc_score(y_test, y_pred_dnn_prob, multi_class='ovr', average='weighted')
+kappa_dnn = cohen_kappa_score(y_test, y_pred_dnn)
+mcc_dnn = matthews_corrcoef(y_test, y_pred_dnn)
+
+# evaluation results
+print(f"DNN Accuracy: {accuracy_dnn:.4f}")
+print(f"DNN F1-score: {f1_dnn:.4f}")
+print(f"DNN AUC: {auc_dnn:.4f}")
+print(f"DNN Cohen's Kappa: {kappa_dnn:.4f}")
+print(f"DNN MCC: {mcc_dnn:.4f}")
