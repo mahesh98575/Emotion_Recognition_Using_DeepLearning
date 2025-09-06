@@ -1,0 +1,80 @@
+import os
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
+
+def load_subject_data(file_path):
+    return pd.read_csv(file_path)  # Adjust delimiter and other options as needed
+
+# Path to the folder containing CSV files
+folder_path = '/content/ECG_data'
+file_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.csv')]
+
+# Load and concatenate data from all files
+dfs = [load_subject_data(file_path) for file_path in file_paths]
+combined_df = pd.concat(dfs, ignore_index=True)
+
+# Drop rows with missing values (NaN)
+combined_df.dropna(inplace=True)
+
+# Encode 'Emotion' column
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+
+# Split features and target
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Standardize the data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Define the ANN model with batch normalization and dropout
+ann_model = Sequential([
+    Dense(128, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+    BatchNormalization(),
+    Dropout(0.5),
+    Dense(64, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.5),
+    Dense(32, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.5),
+    Dense(len(label_encoder.classes_), activation='softmax')
+])
+
+# Compile the model
+ann_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Callbacks for learning rate reduction and early stopping
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.001)
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+# Train the model
+history = ann_model.fit(X_train_scaled, y_train, epochs=40, batch_size=32, validation_split=0.2, callbacks=[reduce_lr, early_stopping])
+
+# Predict and evaluate
+y_pred_ann_prob = ann_model.predict(X_test_scaled)
+y_pred_ann = y_pred_ann_prob.argmax(axis=1)
+
+# Calculate metrics
+accuracy_ann = accuracy_score(y_test, y_pred_ann)
+f1_ann = f1_score(y_test, y_pred_ann, average='weighted')
+auc_ann = roc_auc_score(y_test, y_pred_ann_prob, multi_class='ovr', average='weighted')
+kappa_ann = cohen_kappa_score(y_test, y_pred_ann)
+mcc_ann = matthews_corrcoef(y_test, y_pred_ann)
+
+# Print the evaluation results
+print(f"ANN Accuracy: {accuracy_ann:.4f}")
+print(f"ANN F1-score: {f1_ann:.4f}")
+print(f"ANN AUC: {auc_ann:.4f}")
+print(f"ANN Cohen's Kappa: {kappa_ann:.4f}")
+print(f"ANN MCC: {mcc_ann:.4f}")
