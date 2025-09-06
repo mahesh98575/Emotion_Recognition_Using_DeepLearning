@@ -1,0 +1,97 @@
+import os
+import glob
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, LSTM
+
+# Function to load subject data from all CSVs in a folder
+def load_subject_data_from_folder(folder_path):
+    all_files = glob.glob(os.path.join(folder_path, "*.csv"))
+    dfs = []
+    for file_path in all_files:
+        df = pd.read_csv(file_path)
+        dfs.append(df)
+    combined_df = pd.concat(dfs, ignore_index=True)
+    return combined_df
+
+# Path to the folder containing CSV files
+folder_path = '/content/ECG_data'
+
+# Load and concatenate data
+combined_df = load_subject_data_from_folder(folder_path)
+
+# Check for NaN values in the dataset
+print("Checking for NaN values in the dataset...")
+print(combined_df.isnull().sum())
+
+# Encode the 'Emotion' column
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+
+# Prepare features and target
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Check for NaN values in features and target
+print("NaN values in features:", X.isnull().sum().sum())
+print("NaN values in target:", y.isnull().sum())
+
+# Drop rows with NaN values (if any)
+X = X.dropna()
+y = y[X.index]  # Align target with features
+
+# Split into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Normalize data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Reshape the data for LSTM
+timesteps = X_train_scaled.shape[1]
+features = 1
+X_train_reshaped = X_train_scaled.reshape((X_train_scaled.shape[0], timesteps, features))
+X_test_reshaped = X_test_scaled.reshape((X_test_scaled.shape[0], timesteps, features))
+
+# Define the LSTM model
+lstm_model = Sequential([
+    LSTM(128, activation='relu', input_shape=(timesteps, features)),
+    Dropout(0.5),
+    Dense(64, activation='relu'),
+    Dropout(0.5),
+    Dense(len(label_encoder.classes_), activation='softmax')
+])
+
+# Compile the model
+lstm_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model with validation
+history = lstm_model.fit(X_train_reshaped, y_train, epochs=40, batch_size=32, validation_split=0.2)
+
+# Predict and evaluate
+y_pred_lstm_prob = lstm_model.predict(X_test_reshaped)
+
+# Check for NaN values in predictions
+if pd.isnull(y_pred_lstm_prob).any():
+    raise ValueError("Predicted probabilities contain NaN values.")
+
+y_pred_lstm = y_pred_lstm_prob.argmax(axis=1)
+
+# Calculate metrics
+accuracy_lstm = accuracy_score(y_test, y_pred_lstm)
+f1_lstm = f1_score(y_test, y_pred_lstm, average='weighted')
+auc_lstm = roc_auc_score(pd.get_dummies(y_test), y_pred_lstm_prob, multi_class='ovr', average='weighted')
+kappa_lstm = cohen_kappa_score(y_test, y_pred_lstm)
+mcc_lstm = matthews_corrcoef(y_test, y_pred_lstm)
+
+# Print metrics
+print(f"LSTM Accuracy: {accuracy_lstm:.4f}")
+print(f"LSTM F1-score: {f1_lstm:.4f}")
+print(f"LSTM AUC: {auc_lstm:.4f}")
+print(f"LSTM Kappa: {kappa_lstm:.4f}")
+print(f"LSTM MCC: {mcc_lstm:.4f}")
