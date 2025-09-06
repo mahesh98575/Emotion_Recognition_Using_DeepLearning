@@ -1,0 +1,77 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, LSTM
+import os
+
+def load_subject_data(file_path):
+    df = pd.read_csv(file_path)  # Adjust delimiter and other options as needed
+    return df
+
+# Folder path containing all CSV files
+folder_path = '/content/ECG_data'
+file_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.csv')]
+
+dfs = []
+for file_path in file_paths:
+    df = load_subject_data(file_path)
+    dfs.append(df)
+
+combined_df = pd.concat(dfs, ignore_index=True)
+
+# Drop rows with NaN values
+combined_df.dropna(inplace=True)
+
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Check for NaNs
+if X.isnull().any().any() or y.isnull().any():
+    raise ValueError("Features or target contain NaN values.")
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Normalize data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Reshape data to 3D for LSTM layer
+X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
+X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
+
+# Define the RNN model
+rnn_model = Sequential([
+    LSTM(64, activation='relu', input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2])),
+    Dropout(0.5),
+    Dense(32, activation='relu'),
+    Dropout(0.5),
+    Dense(len(label_encoder.classes_), activation='softmax')
+])
+
+rnn_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+rnn_model.fit(X_train_scaled, y_train, epochs=40, batch_size=32, validation_split=0.2)
+
+# Predict and evaluate
+y_pred_rnn_prob = rnn_model.predict(X_test_scaled)
+y_pred_rnn = y_pred_rnn_prob.argmax(axis=1)
+
+# Evaluate metrics
+accuracy_rnn = accuracy_score(y_test, y_pred_rnn)
+f1_rnn = f1_score(y_test, y_pred_rnn, average='weighted')
+auc_rnn = roc_auc_score(y_test, y_pred_rnn_prob, multi_class='ovr', average='weighted')
+kappa_rnn = cohen_kappa_score(y_test, y_pred_rnn)
+mcc_rnn = matthews_corrcoef(y_test, y_pred_rnn)
+
+print(f"RNN Accuracy: {accuracy_rnn:.4f}")
+print(f"RNN F1-score: {f1_rnn:.4f}")
+print(f"RNN AUC: {auc_rnn:.4f}")
+print(f"RNN Kappa: {kappa_rnn:.4f}")
+print(f"RNN MCC: {mcc_rnn:.4f}")
