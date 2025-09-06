@@ -1,0 +1,97 @@
+import pandas as pd
+import os
+import glob
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+from sklearn.preprocessing import OneHotEncoder
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Conv2D, MaxPooling2D, Flatten
+
+# Function to load subject data from all CSVs in a folder
+def load_subject_data_from_folder(folder_path):
+    all_files = glob.glob(os.path.join(folder_path, "*.csv"))
+    dfs = []
+    for file_path in all_files:
+        df = pd.read_csv(file_path)
+        dfs.append(df)
+    combined_df = pd.concat(dfs, ignore_index=True)
+    return combined_df
+
+# Path to the folder containing CSV files
+folder_path = '/content/ECG_data'
+
+# Load and concatenate data
+combined_df = load_subject_data_from_folder(folder_path)
+
+# Check for NaN values
+print("Checking for NaN values:")
+print(combined_df.isnull().sum())
+
+# Drop rows with NaN values
+combined_df.dropna(inplace=True)
+
+# Encode the 'Emotion' column
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Verify no NaN values in features and labels
+if X.isnull().any().any() or y.isnull().any():
+    raise ValueError("Features or target contain NaN values after cleaning.")
+
+# Split into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Normalize data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Reshape data for CNN (e.g., 10 features, 1 channel)
+height = X_train_scaled.shape[1]  # Adjust based on your data
+width = 1
+channels = 1
+X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], height, width, channels))
+X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], height, width, channels))
+
+# One-hot encode the labels for AUC calculation
+one_hot_encoder = OneHotEncoder(sparse_output=False)
+y_test_onehot = one_hot_encoder.fit_transform(y_test.values.reshape(-1, 1))
+
+# Define CNN model
+cnn_model = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(height, width, channels), padding='same'),
+    MaxPooling2D((2, 1)),
+    Dropout(0.5),
+    Flatten(),
+    Dense(128, activation='relu'),
+    Dropout(0.5),
+    Dense(len(label_encoder.classes_), activation='softmax')
+])
+
+# Compile model
+cnn_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+cnn_model.fit(X_train_scaled, y_train, epochs=40, batch_size=32, validation_split=0.2)
+
+# Predict and evaluate
+y_pred_cnn_prob = cnn_model.predict(X_test_scaled)
+y_pred_cnn = y_pred_cnn_prob.argmax(axis=1)
+
+# Calculate metrics
+accuracy_cnn = accuracy_score(y_test, y_pred_cnn)
+f1_cnn = f1_score(y_test, y_pred_cnn, average='weighted')
+auc_cnn = roc_auc_score(y_test_onehot, y_pred_cnn_prob, multi_class='ovr', average='weighted')
+kappa_cnn = cohen_kappa_score(y_test, y_pred_cnn)
+mcc_cnn = matthews_corrcoef(y_test, y_pred_cnn)
+
+# Print metrics
+print(f"CNN Accuracy: {accuracy_cnn:.4f}")
+print(f"CNN F1-score: {f1_cnn:.4f}")
+print(f"CNN AUC: {auc_cnn:.4f}")
+print(f"CNN Kappa: {kappa_cnn:.4f}")
+print(f"CNN MCC: {mcc_cnn:.4f}")
