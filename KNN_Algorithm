@@ -1,0 +1,71 @@
+import os
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.pipeline import make_pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
+from sklearn.neighbors import KNeighborsClassifier
+
+def load_subject_data(file_path):
+    df = pd.read_csv(file_path)  # Adjust delimiter and other options as needed
+    return df
+
+def load_all_csv_files_from_directory(directory_path):
+    csv_files = [os.path.join(directory_path, file) for file in os.listdir(directory_path) if file.endswith('.csv')]
+    return csv_files
+
+# Directory containing all the CSV files
+directory_path = '/content/data'
+
+# Get list of CSV files from the directory
+file_paths = load_all_csv_files_from_directory(directory_path)
+
+dfs = []
+for file_path in file_paths:
+    df = load_subject_data(file_path)
+    dfs.append(df)
+
+combined_df = pd.concat(dfs, ignore_index=True)
+
+# Encode 'Emotion' column
+label_encoder = LabelEncoder()
+combined_df['Emotion'] = label_encoder.fit_transform(combined_df['Emotion'])
+
+# Split features and target
+X = combined_df.drop('Emotion', axis=1)
+y = combined_df['Emotion']
+
+# Handle missing values using SimpleImputer (fill missing values with the mean)
+imputer = SimpleImputer(strategy='mean')
+X = imputer.fit_transform(X)
+
+# Split into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Build KNN model pipeline
+knn_model = make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=5))
+knn_model.fit(X_train, y_train)
+
+# Predict and evaluate
+y_pred_knn = knn_model.predict(X_test)
+accuracy_knn = accuracy_score(y_test, y_pred_knn)
+f1_knn = f1_score(y_test, y_pred_knn, average='weighted')
+kappa_knn = cohen_kappa_score(y_test, y_pred_knn)
+mcc_knn = matthews_corrcoef(y_test, y_pred_knn)
+
+# Calculate probabilities for all classes
+y_prob_knn = knn_model.predict_proba(X_test)
+
+# Handle multiclass AUC calculation
+if y_prob_knn.shape[1] > 2:  # Check if it's a multiclass problem
+    auc_knn = roc_auc_score(y_test, y_prob_knn, multi_class='ovo')  # Use 'ovo' or 'ovr' as needed
+else:
+    auc_knn = roc_auc_score(y_test, y_prob_knn[:, 1])  # Binary classification
+
+# Print evaluation results
+print(f"KNN Accuracy: {accuracy_knn:.4f}")
+print(f"KNN F1-score: {f1_knn:.4f}")
+print(f"KNN AUC: {auc_knn:.4f}")
+print(f"KNN Cohen's Kappa: {kappa_knn:.4f}")
+print(f"KNN MCC: {mcc_knn:.4f}")
